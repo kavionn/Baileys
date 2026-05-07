@@ -137,6 +137,10 @@ export const makeChatsSocket = (config: SocketConfig) => {
 			useClones: false
 		}) as CacheStore)
 
+	if (!config.placeholderResendCache) {
+		config.placeholderResendCache = placeholderResendCache
+	}
+
 	/** helper function to fetch the given app state sync key */
 	const getAppStateSyncKey = async (keyId: string) => {
 		const { [keyId]: key } = await authState.keys.get('app-state-sync-key', [keyId])
@@ -736,27 +740,7 @@ export const makeChatsSocket = (config: SocketConfig) => {
 	 * type = "image for the high res picture"
 	 */
 	const profilePictureUrl = async (jid: string, type: 'preview' | 'image' = 'preview', timeoutMs?: number) => {
-		const baseContent: BinaryNode[] = [{ tag: 'picture', attrs: { type, query: 'url' } }]
-
-		// WA Web only includes tctoken for user JIDs (not groups/newsletters)
-		// and never for own profile pic (Chat model for self has no tcToken).
-		// Including tctoken for own JID causes the server to never respond.
-		const normalizedJid = jidNormalizedUser(jid)
-		const isUserJid = isPnUser(normalizedJid) || isLidUser(normalizedJid)
-		const me = authState.creds.me
-		const isSelf =
-			me && (normalizedJid === jidNormalizedUser(me.id) || (me.lid && normalizedJid === jidNormalizedUser(me.lid)))
-		let content: BinaryNode[] | undefined = baseContent
-
-		if (serverProps.profilePicPrivacyToken && isUserJid && !isSelf) {
-			content = await buildTcTokenFromJid({
-				authState,
-				jid: normalizedJid,
-				baseContent,
-				getLIDForPN
-			})
-		}
-
+		// TOOD: Add support for tctoken, existingID, and newsletter + group options
 		jid = jidNormalizedUser(jid)
 		const result = await query(
 			{
@@ -767,7 +751,7 @@ export const makeChatsSocket = (config: SocketConfig) => {
 					type: 'get',
 					xmlns: 'w:profile:picture'
 				},
-				content
+				content: [{ tag: 'picture', attrs: { type, query: 'url' } }]
 			},
 			timeoutMs
 		)
@@ -878,16 +862,16 @@ export const makeChatsSocket = (config: SocketConfig) => {
 			}
 		} else if (Array.isArray(content)) {
 			const [firstChild] = content
-			let type = firstChild!.tag as WAPresence
-			if (type === 'paused') {
-				type = 'available'
+			let firstChildTag = firstChild!.tag as WAPresence
+			if (firstChildTag === 'paused') {
+				firstChildTag = 'available'
 			}
 
 			if (firstChild!.attrs?.media === 'audio') {
-				type = 'recording'
+				firstChildTag = 'recording'
 			}
 
-			presence = { lastKnownPresence: type }
+			presence = { lastKnownPresence: firstChildTag }
 		} else {
 			logger.error({ tag, attrs, content }, 'recv invalid presence node')
 		}
