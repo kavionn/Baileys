@@ -680,13 +680,37 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			}
 
 			if (isNewsletter) {
+				const mediaType = getMediaType(message)
+				if (mediaType) {
+					extraAttrs['mediatype'] = mediaType
+				}
+
+				if (normalizeMessageContent(message)?.pollCreationMessage || normalizeMessageContent(message)?.pollCreationMessageV2 || normalizeMessageContent(message)?.pollCreationMessageV3 || normalizeMessageContent(message)?.eventMessage) {
+					const pollMsg = normalizeMessageContent(message)?.pollCreationMessage || normalizeMessageContent(message)?.pollCreationMessageV2 || normalizeMessageContent(message)?.pollCreationMessageV3
+					additionalNodes = additionalNodes || []
+					additionalNodes.push({
+						tag: 'meta',
+						attrs: normalizeMessageContent(message)?.eventMessage ? {
+							event_type: 'creation'
+						} : {
+							polltype: 'creation',
+							contenttype: pollMsg?.pollContentType === 2 ? 'image' : 'text'
+						}
+					})
+				}
+
 				const patched = patchMessageBeforeSending ? await patchMessageBeforeSending(message, []) : message
 				const bytes = encodeNewsletterMessage(patched as proto.IMessage)
 				binaryNodeContent.push({
 					tag: 'plaintext',
-					attrs: {},
+					attrs: extraAttrs,
 					content: bytes
 				})
+
+				if (additionalNodes && additionalNodes.length > 0) {
+					binaryNodeContent.push(...additionalNodes)
+				}
+
 				const stanza: BinaryNode = {
 					tag: 'message',
 					attrs: {
@@ -1379,18 +1403,19 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 				const isEditMsg = 'edit' in content && !!content.edit
 				const isPinMsg = 'pin' in content && !!content.pin
 				const isPollMessage = 'poll' in content && !!content.poll
+				const isNewsletter = jid.endsWith('@newsletter')
 				const additionalAttributes: BinaryNodeAttributes = {}
 				const additionalNodes: BinaryNode[] = []
 				// required for delete
 				if (isDeleteMsg) {
 					// if the chat is a group, and I am not the author, then delete the message as an admin
-					if (isJidGroup(content.delete?.remoteJid as string) && !content.delete?.fromMe) {
+					if ((isJidGroup(content.delete?.remoteJid as string) && !content.delete?.fromMe) || isNewsletter) {
 						additionalAttributes.edit = '8'
 					} else {
 						additionalAttributes.edit = '7'
 					}
 				} else if (isEditMsg) {
-					additionalAttributes.edit = '1'
+					additionalAttributes.edit = isNewsletter ? '3' : '1'
 				} else if (isPinMsg) {
 					additionalAttributes.edit = '2'
 				} else if (isPollMessage) {
