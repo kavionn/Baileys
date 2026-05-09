@@ -685,17 +685,27 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 					extraAttrs['mediatype'] = mediaType
 				}
 
-				if (normalizeMessageContent(message)?.pollCreationMessage || normalizeMessageContent(message)?.pollCreationMessageV2 || normalizeMessageContent(message)?.pollCreationMessageV3 || normalizeMessageContent(message)?.eventMessage) {
-					const pollMsg = normalizeMessageContent(message)?.pollCreationMessage || normalizeMessageContent(message)?.pollCreationMessageV2 || normalizeMessageContent(message)?.pollCreationMessageV3
+				if (
+					normalizeMessageContent(message)?.pollCreationMessage ||
+					normalizeMessageContent(message)?.pollCreationMessageV2 ||
+					normalizeMessageContent(message)?.pollCreationMessageV3 ||
+					normalizeMessageContent(message)?.eventMessage
+				) {
+					const pollMsg =
+						normalizeMessageContent(message)?.pollCreationMessage ||
+						normalizeMessageContent(message)?.pollCreationMessageV2 ||
+						normalizeMessageContent(message)?.pollCreationMessageV3
 					additionalNodes = additionalNodes || []
 					additionalNodes.push({
 						tag: 'meta',
-						attrs: normalizeMessageContent(message)?.eventMessage ? {
-							event_type: 'creation'
-						} : {
-							polltype: 'creation',
-							contenttype: pollMsg?.pollContentType === 2 ? 'image' : 'text'
-						}
+						attrs: normalizeMessageContent(message)?.eventMessage
+							? {
+									event_type: 'creation'
+								}
+							: {
+									polltype: 'creation',
+									contenttype: pollMsg?.pollContentType === 2 ? 'image' : 'text'
+								}
 					})
 				}
 
