@@ -1,6 +1,6 @@
 import { Boom } from '@hapi/boom'
 import { createHash, randomBytes } from 'crypto'
-import Long from 'long'
+import type Long from 'long'
 import { proto } from '../../WAProto/index.js'
 const baileysVersion = [2, 3000, 1035194821]
 import type {
@@ -98,11 +98,11 @@ export const encodeBigEndian = (e: number, t = 4) => {
 }
 
 export const toNumber = (t: Long | number | null | undefined): number => {
-   if (!t) return 0
-   if (typeof t === 'number') return t
-   if (typeof t === 'object' && 'toNumber' in t) return (t as Long).toNumber()
-   if (typeof t === 'object' && 'low' in t) return (t as Long).low
-   return 0
+	if (!t) return 0
+	if (typeof t === 'number') return t
+	if (typeof t === 'object' && 'toNumber' in t) return t.toNumber()
+	if (typeof t === 'object' && 'low' in t) return (t as Long).low
+	return 0
 }
 
 /** unix timestamp of a date in seconds */
