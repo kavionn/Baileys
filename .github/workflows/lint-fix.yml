@@ -1,16 +1,13 @@
-name: Linting Check
+name: Linting Fix
 
 on:
-  push:
-    branches:
-      - master
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  check-lint:
+  fix-lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -39,5 +36,11 @@ jobs:
       - name: Install packages
         run: yarn install --immutable
 
-      - name: Run lint check
-        run: yarn lint
+      - name: Run lint fix
+        run: yarn lint:fix
+
+      - name: Commit changes
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          commit_message: "style: auto lint fix"
+          file_pattern: 'src/**/*.ts'
