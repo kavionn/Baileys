@@ -1,5 +1,6 @@
 import { Boom } from '@hapi/boom'
 import { randomBytes } from 'crypto'
+import { zip } from 'fflate'
 import { promises as fs } from 'fs'
 import { type Transform } from 'stream'
 import { proto } from '../../WAProto/index.js'
@@ -37,10 +38,297 @@ import {
 	generateThumbnail,
 	getAudioDuration,
 	getAudioWaveform,
+	getImageProcessingLibrary,
 	getRawMediaUploadData,
-	type MediaDownloadOptions
+	getStream,
+	type MediaDownloadOptions,
+	toBuffer
 } from './messages-media'
 import { shouldIncludeReportingToken } from './reporting-utils'
+
+const CONCURRENCY_LIMIT = 3
+
+/**
+ * Checks if a buffer is a WebP file
+ */
+const isWebPBuffer = (buffer: Buffer) => {
+	return (
+		buffer.length >= 12 &&
+		buffer[0] === 0x52 &&
+		buffer[1] === 0x49 &&
+		buffer[2] === 0x46 &&
+		buffer[3] === 0x46 &&
+		buffer[8] === 0x57 &&
+		buffer[9] === 0x45 &&
+		buffer[10] === 0x42 &&
+		buffer[11] === 0x50
+	)
+}
+
+/**
+ * Checks if a WebP buffer is animated by looking for VP8X chunk with animation flag
+ * or ANIM/ANMF chunks
+ */
+const isAnimatedWebP = (buffer: Buffer) => {
+	// WebP must start with RIFF....WEBP
+	if (!isWebPBuffer(buffer)) {
+		return false
+	}
+
+	// Parse chunks starting after RIFF header (12 bytes)
+	let offset = 12
+	while (offset < buffer.length - 8) {
+		const chunkFourCC = buffer.toString('ascii', offset, offset + 4)
+		const chunkSize = buffer.readUInt32LE(offset + 4)
+
+		if (chunkFourCC === 'VP8X') {
+			// VP8X extended header, check animation flag (bit 1 at offset+8)
+			const flagsOffset = offset + 8
+			if (flagsOffset < buffer.length) {
+				const flags = buffer[flagsOffset]
+				if (flags && flags & 0x02) {
+					return true
+				}
+			}
+		} else if (chunkFourCC === 'ANIM' || chunkFourCC === 'ANMF') {
+			// ANIM or ANMF chunks indicate animation
+			return true
+		}
+
+		// Move to next chunk (chunk size + 8 bytes header, padded to even)
+		offset += 8 + chunkSize + (chunkSize % 2)
+	}
+
+	return false
+}
+
+const prepareStickerPackMessage = async (
+	message: ExtractByKey<AnyMessageContent, 'stickers'>,
+	options: MessageContentGenerationOptions
+) => {
+	const {
+		cover,
+		stickers = [],
+		name = '📦 Sticker Pack',
+		publisher = 'GitHub: itsliaaa',
+		description = '🏷️ itsliaaa/baileys'
+	} = message
+	if (stickers.length > 60) {
+		throw new Boom('Sticker pack exceeds the maximum limit of 60 stickers', { statusCode: 400 })
+	}
+
+	if (stickers.length === 0) {
+		throw new Boom('Sticker pack must contain at least one sticker', { statusCode: 400 })
+	}
+
+	if (!cover) {
+		throw new Boom('Sticker pack must contain a cover', { statusCode: 400 })
+	}
+
+	const logger = options.logger
+
+	// Lia@Changes 01-02-26 --- Add caching for sticker pack
+	let cacheableKey: string | false = false
+	if (Array.isArray(stickers) && stickers.length && options.mediaCache) {
+		const urls: string[] = []
+		for (let i = 0; i < stickers.length; i++) {
+			const data = stickers[i]?.data
+			if (typeof data === 'object' && 'url' in data && data?.url) {
+				urls.push(data.url.toString())
+			}
+		}
+
+		if (urls.length > 0) {
+			cacheableKey = 'sticker:' + urls.join('@')
+		}
+	}
+
+	if (cacheableKey) {
+		const mediaBuff = await options.mediaCache!.get<Buffer>(cacheableKey)
+		if (mediaBuff) {
+			logger?.debug({ cacheableKey }, 'got media cache hit')
+			return proto.Message.StickerPackMessage.decode(mediaBuff)
+		}
+	}
+
+	const lib = await getImageProcessingLibrary()
+	const hasSharp = 'sharp' in lib && !!lib.sharp?.default
+	const hasImage = 'image' in lib && !!(lib as any).image?.Transformer
+	const hasJimp = 'jimp' in lib && !!lib.jimp?.Jimp
+
+	if (!hasSharp && !hasImage && !hasJimp) {
+		throw new Boom('No image processing library available for converting sticker to WebP.')
+	}
+
+	const stickerPackIdValue = generateMessageIDV2()
+	const stickerData: any = {}
+	const stickerMetadata = new Array(stickers.length)
+
+	for (let i = 0; i < stickers.length; i += CONCURRENCY_LIMIT) {
+		const promises: Promise<void>[] = []
+		const chunkEnd = Math.min(i + CONCURRENCY_LIMIT, stickers.length)
+		for (let j = i; j < chunkEnd; j++) {
+			promises.push(
+				(async (index: number) => {
+					const sticker = stickers[index]
+					if (!sticker) {
+						throw new Error(`Sticker at index ${index} not found`)
+					}
+
+					const { stream } = await getStream(sticker.data)
+					const buffer = await toBuffer(stream)
+					let webpBuffer: Buffer
+					let isAnimated = false
+
+					if (isWebPBuffer(buffer)) {
+						webpBuffer = buffer
+						isAnimated = isAnimatedWebP(buffer)
+					} else if (hasSharp) {
+						webpBuffer = await (lib as any).sharp
+							.default(buffer)
+							.resize(512, 512, { fit: 'inside' })
+							.webp({ quality: 80 })
+							.toBuffer()
+					} else if (hasImage) {
+						webpBuffer = await new (lib as any).image.Transformer(buffer).resize(512, 512).webp(80)
+					} else {
+						const jimpImage = await (lib as any).jimp.Jimp.read(buffer)
+						webpBuffer = await jimpImage.resize({ w: 512, h: 512 }).getBuffer('image/webp', { quality: 80 })
+					}
+
+					if (webpBuffer.length > 1024 * 1024) {
+						throw new Boom(`Sticker at index ${index} exceeds the 1MB size limit`, { statusCode: 400 })
+					}
+
+					const hash = sha256(webpBuffer).toString('base64').replace(/\//g, '-')
+					const fileName = `${hash}.webp`
+
+					stickerData[fileName] = [new Uint8Array(webpBuffer), { level: 0 }]
+					stickerMetadata[index] = {
+						fileName,
+						mimetype: 'image/webp',
+						isAnimated,
+						emojis: sticker.emojis || ['✨'],
+						accessibilityLabel: sticker.accessibilityLabel || '‎'
+					}
+				})(j)
+			)
+		}
+
+		await Promise.all(promises)
+	}
+
+	const trayIconFileName = `${stickerPackIdValue}.webp`
+	const { stream: coverStream } = await getStream(cover)
+	const coverBuffer = await toBuffer(coverStream)
+	let coverWebpBuffer: Buffer
+
+	if (isWebPBuffer(coverBuffer)) {
+		coverWebpBuffer = coverBuffer
+	} else if (hasSharp) {
+		coverWebpBuffer = await (lib as any).sharp
+			.default(coverBuffer)
+			.resize(512, 512, { fit: 'inside' })
+			.webp({ quality: 80 })
+			.toBuffer()
+	} else if (hasImage) {
+		coverWebpBuffer = await new (lib as any).image.Transformer(coverBuffer).resize(512, 512).webp(80)
+	} else {
+		const jimpImage = await (lib as any).jimp.Jimp.read(coverBuffer)
+		coverWebpBuffer = await jimpImage.resize({ w: 512, h: 512 }).getBuffer('image/webp', { quality: 80 })
+	}
+
+	stickerData[trayIconFileName] = [new Uint8Array(coverWebpBuffer), { level: 0 }]
+
+	const zipBuffer = await new Promise<Buffer>((resolve, reject) => {
+		zip(stickerData, (error, data) => (error ? reject(error) : resolve(Buffer.from(data))))
+	})
+
+	const stickerPackUpload = await encryptedStream(zipBuffer, 'sticker-pack', {
+		logger,
+		opts: options.options
+	})
+
+	let stickerPackUploadResult: any
+	try {
+		stickerPackUploadResult = await options.upload(stickerPackUpload.encFilePath, {
+			fileEncSha256B64: stickerPackUpload.fileEncSha256.toString('base64'),
+			mediaType: 'sticker-pack' as any,
+			timeoutMs: options.mediaUploadTimeoutMs
+		})
+	} finally {
+		fs.unlink(stickerPackUpload.encFilePath).catch(() => logger?.warn('failed to remove tmp file'))
+	}
+
+	const obj: any = {
+		name,
+		publisher,
+		stickerPackId: stickerPackIdValue,
+		packDescription: description,
+		stickerPackOrigin: proto.Message.StickerPackMessage.StickerPackOrigin.USER_CREATED,
+		stickerPackSize: zipBuffer.length,
+		stickers: stickerMetadata,
+		fileSha256: stickerPackUpload.fileSha256,
+		fileEncSha256: stickerPackUpload.fileEncSha256,
+		mediaKey: stickerPackUpload.mediaKey,
+		directPath: stickerPackUploadResult.directPath,
+		fileLength: stickerPackUpload.fileLength,
+		mediaKeyTimestamp: unixTimestampSeconds(),
+		trayIconFileName
+	}
+
+	try {
+		let thumbnailBuffer: Buffer
+		if (hasSharp) {
+			thumbnailBuffer = await (lib as any).sharp.default(coverBuffer).resize(252, 252).jpeg().toBuffer()
+		} else if (hasImage) {
+			thumbnailBuffer = await new (lib as any).image.Transformer(coverBuffer).resize(252, 252).jpeg()
+		} else if (hasJimp) {
+			const jimpImage = await (lib as any).jimp.Jimp.read(coverBuffer)
+			thumbnailBuffer = await jimpImage.resize({ w: 252, h: 252 }).getBuffer('image/jpeg')
+		} else {
+			throw new Error('No image processing library available for thumbnail generation')
+		}
+
+		if (!thumbnailBuffer || thumbnailBuffer.length === 0) {
+			throw new Error('Failed to generate thumbnail buffer')
+		}
+
+		const thumbUpload = await encryptedStream(thumbnailBuffer, 'thumbnail-sticker-pack' as any, {
+			logger,
+			opts: options.options
+		})
+
+		let thumbUploadResult: any
+		try {
+			thumbUploadResult = await options.upload(thumbUpload.encFilePath, {
+				fileEncSha256B64: thumbUpload.fileEncSha256.toString('base64'),
+				mediaType: 'thumbnail-sticker-pack' as any,
+				timeoutMs: options.mediaUploadTimeoutMs
+			})
+		} finally {
+			fs.unlink(thumbUpload.encFilePath).catch(() => logger?.warn('failed to remove tmp file'))
+		}
+
+		Object.assign(obj, {
+			thumbnailDirectPath: thumbUploadResult.directPath,
+			thumbnailSha256: thumbUpload.fileSha256,
+			thumbnailEncSha256: thumbUpload.fileEncSha256,
+			thumbnailHeight: 252,
+			thumbnailWidth: 252,
+			imageDataHash: sha256(thumbnailBuffer).toString('base64')
+		})
+	} catch (error) {
+		logger?.warn({ error }, 'failed to generate/upload sticker pack thumbnail')
+	}
+
+	if (cacheableKey && options.mediaCache) {
+		logger?.debug({ cacheableKey }, 'set cache')
+		await options.mediaCache.set(cacheableKey, proto.Message.StickerPackMessage.encode(obj).finish())
+	}
+
+	return proto.Message.StickerPackMessage.fromObject(obj)
+}
 
 type ExtractByKey<T, K extends PropertyKey> = T extends Record<K, any> ? T : never
 type RequireKey<T, K extends keyof T> = T & {
@@ -586,6 +874,8 @@ export const generateWAMessageContent = async (
 				m.pollCreationMessage = pollCreationMessage
 			}
 		}
+	} else if (hasNonNullishProperty(message, 'stickers')) {
+		m.stickerPackMessage = await prepareStickerPackMessage(message, options)
 	} else if (hasNonNullishProperty(message, 'album')) {
 		m.albumMessage = {
 			expectedImageCount: message.album.expectedImageCount,
