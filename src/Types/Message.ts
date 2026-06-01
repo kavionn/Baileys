@@ -244,6 +244,14 @@ export type AnyRegularMessageContent = (
 			Contextable &
 			Editable)
 	| ({
+			stickers: { data: WAMediaUpload; emojis?: string[]; accessibilityLabel?: string }[]
+			cover: WAMediaUpload
+			name?: string
+			publisher?: string
+			description?: string
+	  } & Contextable &
+			Mentionable)
+	| ({
 			album: AlbumMessageOptions
 	  } & Contextable &
 			Mentionable)
