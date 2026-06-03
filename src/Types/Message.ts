@@ -126,6 +126,10 @@ type ViewOnce = {
 	viewOnce?: boolean
 }
 
+type GroupStatus = {
+	groupStatus?: boolean
+}
+
 type Editable = {
 	edit?: WAMessageKey
 }
@@ -292,7 +296,8 @@ export type AnyRegularMessageContent = (
 	| SharePhoneNumber
 	| RequestPhoneNumber
 ) &
-	ViewOnce
+	ViewOnce &
+	GroupStatus
 
 export type AnyMessageContent =
 	| AnyRegularMessageContent

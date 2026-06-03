@@ -905,6 +905,21 @@ export const generateWAMessageContent = async (
 		m = { viewOnceMessage: { message: m } }
 	}
 
+	if (hasOptionalProperty(message, 'groupStatus') && !!message.groupStatus) {
+		const messageType = Object.keys(m)[0]! as Extract<keyof proto.IMessage, MessageWithContextInfo>
+		const key = m[messageType]
+		if (key && 'contextInfo' in key) {
+			key.contextInfo = key.contextInfo || {}
+			key.contextInfo.isGroupStatus = message.groupStatus
+		} else if (key!) {
+			key.contextInfo = {
+				isGroupStatus: message.groupStatus
+			}
+		}
+
+		m = { groupStatusMessageV2: { message: m } }
+	}
+
 	if (
 		(hasOptionalProperty(message, 'mentions') && message.mentions?.length) ||
 		(hasOptionalProperty(message, 'mentionAll') && message.mentionAll)
