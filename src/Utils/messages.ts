@@ -918,6 +918,7 @@ export const generateWAMessageContent = async (
 		}
 
 		m = { groupStatusMessageV2: { message: m } }
+		delete message.groupStatus
 	}
 
 	if (

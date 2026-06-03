@@ -736,8 +736,35 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 				return
 			}
 
-			if (normalizeMessageContent(message)?.pinInChatMessage || normalizeMessageContent(message)?.reactionMessage) {
+			const innerMessage = normalizeMessageContent(message)
+			const isNeedMetaAttrs = innerMessage?.pinInChatMessage || innerMessage?.keepInChatMessage || innerMessage?.reactionMessage
+			const isGroupStatus = message?.groupStatusMessage || message?.groupStatusMessageV2
+			const isPollUpdate = innerMessage?.pollUpdateMessage
+
+			if (isNeedMetaAttrs || isGroupStatus || isPollUpdate) {
+				const metaAttrs: Record<string, string> = {}
+				if (isNeedMetaAttrs) {
+					metaAttrs.content_type = 'add_on'
+				}
+				if (isPollUpdate && !isGroupStatus) {
+					metaAttrs.polltype = 'vote'
+				}
+				if (isGroupStatus) {
+					metaAttrs.is_group_status = 'true'
+				}
+				binaryNodeContent.push({
+					tag: 'meta',
+					attrs: metaAttrs,
+					content: undefined
+				})
+			}
+
+			if (isNeedMetaAttrs || innerMessage?.protocolMessage?.memberLabel || innerMessage?.protocolMessage?.editedMessage || innerMessage?.protocolMessage?.mediaNotifyMessage) {
 				extraAttrs['decrypt-fail'] = 'hide' // todo: expand for reactions and other types
+			}
+
+			if (innerMessage?.interactiveResponseMessage?.nativeFlowResponseMessage) {
+				extraAttrs['native_flow_name'] = innerMessage.interactiveResponseMessage.nativeFlowResponseMessage.name
 			}
 
 			if (isGroupOrStatus && !isRetryResend) {
