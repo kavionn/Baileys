@@ -918,7 +918,7 @@ export const generateWAMessageContent = async (
 		}
 
 		m = { groupStatusMessageV2: { message: m } }
-		delete message.groupStatus
+		Reflect.deleteProperty(message, 'groupStatus')
 	}
 
 	if (
