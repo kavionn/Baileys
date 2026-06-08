@@ -1,9 +1,9 @@
-## 1.0.4 (2026-06-08)
+## 1.0.5 (2026-06-08)
 
 
-### Features
+### Bug Fixes
 
-* **socket:** conditional bot label to preserve link previews in private chats ([1588367](github.com/kavionn/baileys/commits/15883676d55ba21308520029fe0fe35c87476707))
+* **socket:** detect native linkPreview thumbnails to skip bot label ([d7abcdd](github.com/kavionn/baileys/commits/d7abcdd6c8f4d6ef2abdb2cd263cbe742dbf3f61))
 
 
 
