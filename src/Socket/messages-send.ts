@@ -1165,7 +1165,12 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			const hasBizNode = additionalNodes?.some(node => node.tag === 'biz')
 
 			if (!isProtocolMsg && !isNewsletter && !isStatus && !isGroup) {
-				;(stanza.content as BinaryNode[]).push({ tag: 'bot', attrs: { biz_bot: '1' } })
+				const extCtx = normalizedContent?.extendedTextMessage?.contextInfo
+				const hasAdThumbnail = !!(extCtx?.externalAdReply?.thumbnail || extCtx?.externalAdReply?.thumbnailUrl)
+				if (!hasAdThumbnail) {
+					;(stanza.content as BinaryNode[]).push({ tag: 'bot', attrs: { biz_bot: '1' } })
+				}
+
 				if (!hasBizNode) {
 					;(stanza.content as BinaryNode[]).push({ tag: 'biz', attrs: {} })
 				}
