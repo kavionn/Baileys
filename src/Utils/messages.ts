@@ -911,14 +911,14 @@ export const generateWAMessageContent = async (
 		if (key && 'contextInfo' in key) {
 			key.contextInfo = key.contextInfo || {}
 			key.contextInfo.isGroupStatus = message.groupStatus
-		} else if (key!) {
+		} else if (key) {
 			key.contextInfo = {
 				isGroupStatus: message.groupStatus
 			}
 		}
 
 		m = { groupStatusMessageV2: { message: m } }
-		Reflect.deleteProperty(message, 'groupStatus')
+		;(message as Record<string, unknown>).groupStatus = undefined
 	}
 
 	if (
@@ -1108,17 +1108,32 @@ export const normalizeMessageContent = (content: WAMessageContent | null | undef
 
 	return content!
 
+	// Lia@Changes 03-02-26 --- Add all futureProofMessage into getFutureProofMessage()
 	function getFutureProofMessage(message: typeof content) {
 		return (
-			message?.ephemeralMessage ||
-			message?.viewOnceMessage ||
-			message?.documentWithCaptionMessage ||
-			message?.viewOnceMessageV2 ||
-			message?.viewOnceMessageV2Extension ||
-			message?.editedMessage ||
 			message?.associatedChildMessage ||
+			message?.botForwardedMessage ||
+			message?.botInvokeMessage ||
+			message?.botTaskMessage ||
+			message?.documentWithCaptionMessage ||
+			message?.editedMessage ||
+			message?.ephemeralMessage ||
+			message?.eventCoverImage ||
+			message?.groupMentionedMessage ||
+			message?.groupStatusMentionMessage ||
 			message?.groupStatusMessage ||
-			message?.groupStatusMessageV2
+			message?.groupStatusMessageV2 ||
+			message?.limitSharingMessage ||
+			message?.lottieStickerMessage ||
+			message?.pollCreationMessageV4 ||
+			message?.pollCreationOptionImageMessage ||
+			message?.questionMessage ||
+			message?.questionReplyMessage ||
+			message?.statusAddYours ||
+			message?.statusMentionMessage ||
+			message?.viewOnceMessage ||
+			message?.viewOnceMessageV2 ||
+			message?.viewOnceMessageV2Extension
 		)
 	}
 }
