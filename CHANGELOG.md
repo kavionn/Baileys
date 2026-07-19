@@ -1,9 +1,9 @@
-## 1.0.5 (2026-06-08)
+## 1.0.6 (2026-07-19)
 
 
 ### Bug Fixes
 
-* **socket:** detect native linkPreview thumbnails to skip bot label ([d7abcdd](github.com/kavionn/baileys/commits/d7abcdd6c8f4d6ef2abdb2cd263cbe742dbf3f61))
+* **messages:** support groupStatusMessageV2 wrapping in send and decode ([16da273](github.com/kavionn/baileys/commits/16da273923c1599cb9a0ad9d48e62e3000626eb3))
 
 
 
